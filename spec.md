@@ -45,7 +45,8 @@ Additional requirements:
 
 - `WriteHeader` and `WriteColumn` can be called in any order with undefined behavior. Make it so WriteHeader can be called only once and `WriteColumn` can only be called after that.
 - `Write` is a poor term. Make it `Add`, which is more conventional.
-- We can switch to `AddRow` making it a single call that takes `params string[]`.
+- We can switch to `AddRow` to take `params string[]`, switching multiple calls to a single one.
+- Remove `EndRow` as a concept. The call to `AddRow` implicitly ends the row.
+- Remove any methods that are not called by implementations within the repo.
 - Consider other code quality and usability improvements.
-
-Thanks!
+- There is flexibility on the way `IWriter` is handled. `Table` can still take `IWriter` or we can use a pattern like `writer(table)` relying to `table.ToString()`.
