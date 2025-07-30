@@ -105,6 +105,7 @@ Success Criteria
 - Clean, intuitive API that's pleasant to use
 - All existing usage sites work with minimal changes
 - Visual output passes the "does this look professional?" test
+- Only use the SupportedOsMd tool for testing. All code needs to compile but only this tool needs to be tested for quality output.
 
 Architecture Hint
 
