@@ -61,9 +61,11 @@ We need four numbers for each column:
 - A: Header length (sets the min; it is a legal outlier)
 - B: Length of the 50% percentile row for the column
 - C: Length of the longest row <= B * 1.2
-- D: max(A, B, C)
+- D: max(A, B, C) + 2
 
-'D' is the default column width (where the pipe goes).
+'D' is the total column width including padding spaces (after the leading pipe and before the trailing one).
+
+Note: The +2 accounts for the required padding spaces before and after content (e.g., "| content |" needs 2 extra characters beyond the content length).
 
 Naming:
 
@@ -77,6 +79,7 @@ Layout rules:
 1. All columns should end at 'D' unless the content goes longer. The content should never be truncated.
 2. All columns need to start and end with one padding space, for style. That means that allowable space for content is within that, such as "| twenty-six characters here |".
 3. If the row content (including the padding spaces) is already past 'D', it should stop immediately with '|'.
+4. The separator row uses the same padding structure as content rows: `| ---- |` (space + dashes + space), ensuring visual symmetry and alignment.
 
 Let's take a look with an example:
 
