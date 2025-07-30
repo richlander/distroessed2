@@ -78,23 +78,27 @@ Layout rules:
 
 1. All columns should end at 'D' unless the content goes longer. The content should never be truncated.
 2. All columns need to start and end with one padding space, for style. That means that allowable space for content is within that, such as "| twenty-six characters here |".
-3. If the row content (including the padding spaces) is already past 'D', it should stop immediately with '|'.
+3. If the row content (including the padding spaces) is greater than 'D', then the column should stop immediately with '|'.
+4. If the row content (including the padding spaces) is less than 'D', the the column should pad to D ending with '|'.
 4. The separator row uses the same padding structure as content rows: `| ---- |` (space + dashes + space), ensuring visual symmetry and alignment.
 
 Let's take a look with an example:
 
-| Lorem | Lorem Ipsum | Dolor dolor   |
-| ----- | ----------- | ------------- |
-| Duis  | Duis aute   | cillum dolore |
-| dolor | consequat   | proident      |
-| Velit | sunt in culpa qui | nostrud |
+| Lorem | Lorem Ipsum | Dolor dolor   | Ipsum |
+| ----- | ----------- | ------------- | ----- |
+| Duis  | Duis aute   | cillum dolore | dolor |
+| dolor | consequat   | proident      | dolor |
+| Velit | sunt in culpa qui | nostrud | dolor |
+| Velit | sunt in culpa qui | qui     | sunt in culpa |
 
 
 We see a few things at play:
 
 - In column 1, all rows line up. The differentiation provided by the algorithm is not yet visible.
-- In column 2, we see that the header defines the column width and the last column is an outlier so pushes its pipe right.
-- In column 3, we see that the first row defines the column width and that the last row is able to correct its "overage" and end at the desired spot matching the rest of the table. This is a classic case of whitespace reduction producing a globally consistent and aesthetic result.
+- In column 2, we see that the header defines the column width and the last two columns are outliers which pushes their pipes right.
+- In column 3, we see that the first row defines the column width and that the last two rows are able to correct thier "overages" and end at the desired spot. The "nodstrud" column ends with no space left. The "qui" column pads to the correct position.
+- In column 4, we see most rows are able to match on the final row pipe, creating a very nice rendering. The last row exceeds the space budget with a pipe that goes further to the right than others.
+- Looked at holistically, you can see that an implementation is best served by a running total for the column widths. The need for that is demonstrated by the sophisticated padding in the last two rows, which itentionally conserves and adds spacs with the intent to align on column pipes further to the right. 
 
 ## Critical Architectural Insight
 
