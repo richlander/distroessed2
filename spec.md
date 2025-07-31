@@ -93,7 +93,9 @@ We see a few things at play:
 
 ## Overflow algorithm description
 
-This section describes a more dynamic overflow scheme. It is a natural extension of the core design and operates on the same principles.
+This section describes an enhanced algorithm that smooths jagged right edges in tables. It builds on the core algorithm by considering how content overflow from earlier columns affects later columns.
+
+### The problem: jagged right edges
 
 Let's look at the following table.
 
@@ -111,7 +113,11 @@ Let's look at the following table.
 | [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22] |
 ```
 
-The rightmost edge of the table is more jagged than it needs to be. It was printed via the core algorithm. We can add another layer of smoothing to it such that the right-edge is no longer jagged.
+The rightmost edge of the table is more jagged than it needs to be. It was generated via the core algorithm, demonstrating its shortcomings. We can add another layer of smoothing to it such that the right-edge is no longer jagged.
+
+### The solution: right-edge smoothing
+
+The overflow algorithm considers the effective position of content after accounting for earlier column overflows. This allows the algorithm to widen the final column to accommodate shifted content, creating a smoother right edge.
 
 Instead the table could look like the following.
 
@@ -129,39 +135,52 @@ Instead the table could look like the following.
 | [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22]   |
 ```
 
-To achieve that, we need to record another length for each column. We need to add another value to the algorithm described earlier:
+### Enhanced algorithm
 
-We need five numbers for each column:
+We need five numbers for each column (extending the core algorithm):
 
 - A: Header length (sets the min; it is a legal outlier)
 - B: Length of the percentile row (like 50% percentile) for the column defined by `PercentileThreshold`
-- C1: Length of the longest row <= B * `ToleranceMultiplier`
-- C2: Length of the longest overflowed row (with its left-most edge reset to the column start) <= B * `ToleranceMultiplier`
-- D: max(A, B, C1, C2) + 2
+- C1: Length of the longest row <= B * `ToleranceMultiplier` (original core algorithm)
+- C2: Length of the longest content that, when positioned after accumulated overflow from previous columns, fits within B * `ToleranceMultiplier`
+- D2: max(A, B, C1, C2) + 2
 
-C2 mey be confusing so let's define it more with the example above, looking at the last two rows.
+### Understanding C2: Effective Positioning
+
+C2 accounts for how earlier column overflows shift later content.
+
+Without C2 consideration:
 
 ```text
 | [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20] |
 | [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22] |
 ```
 
-That's what the two rows look like given the core algorithm.
+With C2 consideration:
 
-Intead, imagine the last row was started earlier:
+| [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20]   |
+| [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22] |
 
-```text
-| [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20] |
-| [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x6| xx[Lifecycle][22] |
-```
+The algorithm recognizes that "[Lifecycle][22]" in the Ubuntu row appears further right due to the longer version string. If this "effective position" (content length + accumulated overflow) falls within the tolerance, the final column (for all rows using the width defined by D) can be widened to accommodate it.
 
-I added "xx" as padding to show that two extra spaces been added, preceding the actual content. This makes the two rows equivalent.
+### Implementation Approach
 
-- The first row has 16 characters in the last column.
-- The second row has 18 characters in the last column.
-- C2 would be calculated on the value 18 for the Ubuntu row.
-- If C2 satisfied the rule for `ToleranceMultiplier`, the D would be 18 not 16, which would smooth the right edge of the table. 
-- C2 is much the same as C1, but calculated with knowledge of the accumulated width of the column and a smart reset on the left-most edge relative to the default edge for the column.
+We need to track some more numbers for this algorith, using different letters.
+
+- V: Accumulated length for where the column naturally starts per D (not the overflow case)
+- X: Acculimated length for where the column actually starts (overflow case)
+- Y: Y - X
+- Z: content.Length + Y
+- C2: Length of the longest Z value that fits within B * `ToleranceMultiplier` (using the value B from above)
+- D2: max(A, B, C1, C2) + 2
+
+Let's reason about that in terms of the example above, without C2 consideration.
+
+- The content length of the last column for both rows is the same: 16 characters.
+- The last row starts two characters later. As a result, we want to represent a longer content content length: 18 characters (16 + 2).
+- The "Z" calulation represents that.
+- "C2" represents the longest "Z" value fits within B * `ToleranceMultiplier`, just like for C1 (same rule over different data)
+- After that, it's easy to add another term into the D (renamed D2) calculation.
 
 ## Algorithm Summary
 
