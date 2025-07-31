@@ -260,6 +260,7 @@ The current API has several issues:
 - Verbose row creation (multiple method calls)
 - Poor method naming ("Write" should be replaced with "Add")
 - No forced ordering on adding the header vs columns.
+- The `UseOuterPipes` capability significantly complicates the implementation and is unused by the callers in the repo. It should be removed.
 
 A successfull implementation should provide the following simpler usage pattern:
 
