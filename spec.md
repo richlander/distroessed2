@@ -1,12 +1,12 @@
 # Dynamic Table Width Refactoring
 
-I have a markdown table generation library that currently uses static, hardcoded column widths. I want to refactor it to calculate optimal column widths dynamically based on applying an algoithm to the complete table content. Think of this as an optimization that requires a global view.
+I have a markdown table generation library that currently uses static, hardcoded column widths. I want to refactor it to calculate optimal column widths dynamically. Think of this as an optimization that requires knowledge of the complete table, stored data about column lengths, and calculated metrics that drive pretty-printer behavior.
 
-The intended solution is a markdown table pretty-printer with matching columns and whitespace reduction as competing aesthetic goals. The intent is that column pipes match across rows except when making them match requires the use of too much whitespace. The question is how to define "too much" and how to do that consistently across tables. Implementing this solution requires applying a consistent algorithm on a global view of each table. It is not possible to start writing the header pipes until the last row has been seen since the header and the last column row should be made to match, if the algorithm allows.
+The intended solution is a markdown table pretty-printer with aligned columns and whitespace reduction as competing aesthetic goals. The intent is that column pipes match across rows except when making them match requires the use of too much whitespace. The question is how to define "too much" and how to do that consistently across tables. Implementing this solution requires applying a consistent algorithm on a global view of each table. It is not possible to start writing the header pipes until the last row has been seen since the header and the last column row should be made to match, if the algorithm allows.
 
 In a more typical solution, all columns widths are made to match. This is easy to implement, but not necesarily nice to look at. Column widths will be stretched due to an outlier column in one row. A column that has 10 characters in all rows except one that has 50 adds 40 whitespace characters to all the 10-character rows for that column and extends the table width by the same amount. If this situation repeats in multiple columns, then the table can end up much wider than needed, mostly filled with whitespace. These tables are not bad, but a stylistic choice. It isn't what is desired for this implementation.
 
-The static hard-coded widths were used to force a default width. They are a pragmatic by inellegant solution that works for a single user but does not scale to a large set of users. We want a design that would well for hundreds of users generating thousands of different markdown tables.
+The static hard-coded widths were used to force a default width. They are a pragmatic but inellegant solution that works for a single programmer but does not scale to a large set of programmers. We want a design that would well for hundreds of programmers generating thousands of different markdown tables.
 
 An earlier protype of this feature led to the discovery that magic numbers (defined later) are required to break the tie between matching columns and whitespace reduction. This is both because it very difficult to determine what "looks good" without significant iteration and we want the same model applied to all tables.
 
@@ -40,37 +40,27 @@ foreach (Cve cve in cves.Cves)
 }
 ```
 
-## Algorithm Requirements
+## Core algorithm description
 
-**Specific percentile values required:**
-- Use the **50th percentile (median)** of content lengths as the base width calculation
-- Apply a **20% tolerance multiplier** (1.2x) to accommodate reasonable outliers
-- Formula: `max(header_length, median_length, longest_within_120%_of_median)`
+The algorithm is best described in two phases, to improve comprehension. This section describes the core algorithm.
 
-**Do NOT use:**
-- 90th percentile (creates excessive whitespace)
-- 95th percentile (creates excessive whitespace)
-- Simple maximum (one outlier ruins everything)
+The following scheme provides a smoothing algorithm that helps us implement a "pretty-printer with aligned columns and whitespace reduction as competing aesthetic goals".
 
-This scheme is statistical. It requires a complete view of the content. The 50/20 combination is specifically tuned to produce professional-looking tables that balance readability with efficient space usage. These numbers were arrived at by iteration and scoring them with human eyes not unix core tools. The magic numbers specified give you the same benefit as human eyes for this problem.
+Factors:
 
-## Algorithm description
+- "PercentileThreshold": 0.5 (must be between 0 and 1.0)
+- "ToleranceMultiplier": 2.0 (must be > 1.0)
 
 We need four numbers for each column:
 
 - A: Header length (sets the min; it is a legal outlier)
-- B: Length of the 50% percentile row for the column
-- C: Length of the longest row <= B * 1.2
+- B: Length of the percentile row (like 50% percentile) for the column defined by `PercentileThreshold`
+- C: Length of the longest row <= B * `ToleranceMultiplier` (this value needs to be above 1.0 to be effective)
 - D: max(A, B, C) + 2
 
 'D' is the total column width including padding spaces (after the leading pipe and before the trailing one).
 
 Note: The +2 accounts for the required padding spaces before and after content (e.g., "| content |" needs 2 extra characters beyond the content length).
-
-Naming:
-
-- "PercentileThreshold" -- name for B
-- "ToleranceMultiplier" -- name for C
 
 Note: "D" could have a special name, too, however it is just a local so doesn't need a special name. "PercentileThreshold" and "ToleranceMultiplier" are intended to be configurable properties on the `Table` type with the default values specified.
 
@@ -91,6 +81,7 @@ Let's take a look with an example:
 | Velit | sunt in culpa qui | nostrud | dolor |
 | Velit | sunt in culpa qui | qui     | sunt in culpa |
 
+This pretty-printing result is considered good.
 
 We see a few things at play:
 
@@ -98,7 +89,100 @@ We see a few things at play:
 - In column 2, we see that the header defines the column width and the last two columns are outliers which pushes their pipes right.
 - In column 3, we see that the first row defines the column width and that the last two rows are able to correct thier "overages" and end at the desired spot. The "nodstrud" column ends with no space left. The "qui" column pads to the correct position.
 - In column 4, we see most rows are able to match on the final row pipe, creating a very nice rendering. The last row exceeds the space budget with a pipe that goes further to the right than others.
-- Looked at holistically, you can see that an implementation is best served by a running total for the column widths. The need for that is demonstrated by the sophisticated padding in the last two rows, which itentionally conserves and adds spacs with the intent to align on column pipes further to the right. 
+- Looked at holistically, you can see that an implementation is best served by a running total for the column widths. The need for that is demonstrated by the sophisticated padding in the last two rows, which itentionally conserves and adds spacs with the intent to align on column pipes further to the right.
+
+## Overflow algorithm description
+
+This section describes a more dynamic overflow scheme. It is a natural extension of the core design and operates on the same principles.
+
+Let's look at the following table.
+
+```text
+| OS                             | Versions | Architectures              | Lifecycle       |
+| ------------------------------ | -------- | -------------------------- | --------------- |
+| [Alpine][6]                    | 3.22, 3.21, 3.20, 3.19 | Arm32, Arm64, x64 | [Lifecycle][7] |
+| [Azure Linux][8]               | 3.0      | Arm64, x64                 | None            |
+| [CentOS Stream][9]             | 10, 9    | Arm64, ppc64le, s390x, x64 | [Lifecycle][10] |
+| [Debian][11]                   | 12       | Arm32, Arm64, x64          | [Lifecycle][12] |
+| [Fedora][13]                   | 42, 41   | Arm32, Arm64, x64          | [Lifecycle][14] |
+| [openSUSE Leap][15]            | 15.6     | Arm64, x64                 | [Lifecycle][16] |
+| [Red Hat Enterprise Linux][17] | 10, 9, 8 | Arm64, ppc64le, s390x, x64 | [Lifecycle][18] |
+| [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20] |
+| [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22] |
+```
+
+The rightmost edge of the table is more jagged than it needs to be. It was printed via the core algorithm. We can add another layer of smoothing to it such that the right-edge is no longer jagged.
+
+Instead the table could look like the following.
+
+```text
+| OS                             | Versions | Architectures              | Lifecycle           |
+| ------------------------------ | -------- | -------------------------- | ------------------- |
+| [Alpine][6]                    | 3.22, 3.21, 3.20, 3.19 | Arm32, Arm64, x64 | [Lifecycle][7] |
+| [Azure Linux][8]               | 3.0      | Arm64, x64                 | None                |
+| [CentOS Stream][9]             | 10, 9    | Arm64, ppc64le, s390x, x64 | [Lifecycle][10]     |
+| [Debian][11]                   | 12       | Arm32, Arm64, x64          | [Lifecycle][12]     |
+| [Fedora][13]                   | 42, 41   | Arm32, Arm64, x64          | [Lifecycle][14]     |
+| [openSUSE Leap][15]            | 15.6     | Arm64, x64                 | [Lifecycle][16]     |
+| [Red Hat Enterprise Linux][17] | 10, 9, 8 | Arm64, ppc64le, s390x, x64 | [Lifecycle][18]     |
+| [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20]     |
+| [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22]   |
+```
+
+To achieve that, we need to record another length for each column. We need to add another value to the algorithm described earlier:
+
+We need five numbers for each column:
+
+- A: Header length (sets the min; it is a legal outlier)
+- B: Length of the percentile row (like 50% percentile) for the column defined by `PercentileThreshold`
+- C1: Length of the longest row <= B * `ToleranceMultiplier`
+- C2: Length of the longest overflowed row (with its left-most edge reset to the column start) <= B * `ToleranceMultiplier`
+- D: max(A, B, C1, C2) + 2
+
+C2 mey be confusing so let's define it more with the example above, looking at the last two rows.
+
+```text
+| [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20] |
+| [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22] |
+```
+
+That's what the two rows look like given the core algorithm.
+
+Intead, imagine the last row was started earlier:
+
+```text
+| [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20] |
+| [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x6| xx[Lifecycle][22] |
+```
+
+I added "xx" as padding to show that two extra spaces been added, preceding the actual content. This makes the two rows equivalent.
+
+- The first row has 16 characters in the last column.
+- The second row has 18 characters in the last column.
+- C2 would be calculated on the value 18 for the Ubuntu row.
+- If C2 satisfied the rule for `ToleranceMultiplier`, the D would be 18 not 16, which would smooth the right edge of the table. 
+- C2 is much the same as C1, but calculated with knowledge of the accumulated width of the column and a smart reset on the left-most edge relative to the default edge for the column.
+
+## Algorithm Summary
+
+**Specific values required:**
+- Use the **50th percentile (median)** of content lengths as the base width calculation
+- Apply a **100% tolerance multiplier** (2x) to accommodate reasonable outliers
+- Formula: `max(header_length, median_row_length, longest_row_within_100%_of_median, longest_overflow_row_within_100%_of_median)`
+
+**Do NOT use:**
+- 90th percentile (creates excessive whitespace)
+- 95th percentile (creates excessive whitespace)
+- Simple maximum (one outlier ruins everything)
+
+This scheme is statistical. It requires a complete view of the content. The 50/100 combination is specifically tuned to produce professional-looking tables that balance readability with efficient space usage. These numbers were arrived at by iteration and scoring them with human eyes not unix core tools. The magic numbers specified give you the same benefit as human eyes for this problem.
+
+## Implementation tips
+
+- The table concepts in the forumula all require having access to the complete table in memory.
+- The overflow calculation requires developing an undertanding the acculated width of the row, column by column.
+- A great implementation will generate a plan ahead of time and render the table in terms of that plan.
+- An amazing implementation woulc be easy to extend with different styles of pretty-printers based on a clear separation between planning and rendering.
 
 ## Critical Architectural Insight
 
@@ -108,20 +192,36 @@ This means the fundamental write-immediately architecture must change to a colle
 
 ## Visual Quality Check
 
-Good example (note the aligned pipes for most rows, exceptions for outliers):
+Good example (core rules only applied; note the aligned pipes for most rows, exceptions for outliers):
 
 ```text
-| OS                  | Versions | Architectures     | Lifecycle       |
-| ------------------- | -------- | ----------------- | --------------- |
-| [Alpine][6]         | 3.22, 3.21, 3.20, 3.19 | Arm32, Arm64, x64 | [Lifecycle][7] |
-| [Azure Linux][8]    | 3.0      | Arm64, x64        | None            |
-| [CentOS Stream][9]  | 10, 9    | Arm64, ppc64le, s390x, x64 | [Lifecycle][10] |
-| [Debian][11]        | 12       | Arm32, Arm64, x64 | [Lifecycle][12] |
-| [Fedora][13]        | 42, 41   | Arm32, Arm64, x64 | [Lifecycle][14] |
-| [openSUSE Leap][15] | 15.6     | Arm64, x64        | [Lifecycle][16] |
+| OS                             | Versions | Architectures              | Lifecycle       |
+| ------------------------------ | -------- | -------------------------- | --------------- |
+| [Alpine][6]                    | 3.22, 3.21, 3.20, 3.19 | Arm32, Arm64, x64 | [Lifecycle][7] |
+| [Azure Linux][8]               | 3.0      | Arm64, x64                 | None            |
+| [CentOS Stream][9]             | 10, 9    | Arm64, ppc64le, s390x, x64 | [Lifecycle][10] |
+| [Debian][11]                   | 12       | Arm32, Arm64, x64          | [Lifecycle][12] |
+| [Fedora][13]                   | 42, 41   | Arm32, Arm64, x64          | [Lifecycle][14] |
+| [openSUSE Leap][15]            | 15.6     | Arm64, x64                 | [Lifecycle][16] |
 | [Red Hat Enterprise Linux][17] | 10, 9, 8 | Arm64, ppc64le, s390x, x64 | [Lifecycle][18] |
-| [SUSE Enterprise Linux][19] | 15.6 | Arm64, x64    | [Lifecycle][20] |
-| [Ubuntu][21]        | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22] |
+| [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20] |
+| [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22] |
+```
+
+Great example (both core and overflow rules applied):
+
+```text
+| OS                             | Versions | Architectures              | Lifecycle           |
+| ------------------------------ | -------- | -------------------------- | ------------------- |
+| [Alpine][6]                    | 3.22, 3.21, 3.20, 3.19 | Arm32, Arm64, x64 | [Lifecycle][7] |
+| [Azure Linux][8]               | 3.0      | Arm64, x64                 | None                |
+| [CentOS Stream][9]             | 10, 9    | Arm64, ppc64le, s390x, x64 | [Lifecycle][10]     |
+| [Debian][11]                   | 12       | Arm32, Arm64, x64          | [Lifecycle][12]     |
+| [Fedora][13]                   | 42, 41   | Arm32, Arm64, x64          | [Lifecycle][14]     |
+| [openSUSE Leap][15]            | 15.6     | Arm64, x64                 | [Lifecycle][16]     |
+| [Red Hat Enterprise Linux][17] | 10, 9, 8 | Arm64, ppc64le, s390x, x64 | [Lifecycle][18]     |
+| [SUSE Enterprise Linux][19]    | 15.6     | Arm64, x64                 | [Lifecycle][20]     |
+| [Ubuntu][21]                   | 25.04, 24.04, 22.04 | Arm32, Arm64, x64 | [Lifecycle][22]   |
 ```
 
 Bad example (perfectly aligned):
@@ -152,7 +252,7 @@ Bad example (misaligned pipes, poor width distribution):
 
 Requirements:
 - The B and C values defined above should be named "PercentileThreshold" and "ToleranceMultiplier", respectively
-- "PercentileThreshold" (50) and "ToleranceMultiplier" (20) should be configurable as a Table class property with the stated defaults. 50 and 20 work quite well but there may be cases where other values work better.
+- "PercentileThreshold" (0.5) and "ToleranceMultiplier" (2.0) should be configurable as a Table class property with the stated defaults. These values work quite well but there may be cases where other values work better.
 
 The current API has several issues:
 - Requires IWriter parameter (tight coupling)
@@ -177,7 +277,7 @@ foreach (Cve cve in cves.Cves)
 writer.Write(cveTable);
 ```
 
-The intent is that `Table.AddColumn` takes a `params string[]`, allowing for multiple usage patterns. The `Table` class should be decoupled from `IWriter` and rely on `ToString` as its rendering model (much like `StringBuilder`).
+The intent is that `Table.AddColumn` takes a `params string[]`, allowing for multiple usage patterns. The `Table` class should be decoupled from `IWriter` and rely on `ToString` as its rendering model (much like `StringBuilder`). `params string[]` requires a project be configured for C# 13+ and/or .NET 9+.
 
 Validation Steps
 
